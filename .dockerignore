@@ -1,0 +1,8 @@
+node_modules
+build
+.cache
+.parkrun-browser-profile
+.git
+.gitignore
+npm-debug.log*
+README.md

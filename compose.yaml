@@ -1,0 +1,18 @@
+services:
+  nbrg-parkrun-report:
+    build: .
+    restart: unless-stopped
+    init: true
+    environment:
+      PORT: 3000
+      PARKRUN_DATA_DIR: /data
+      PARKRUN_HEADLESS: "false"
+      PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
+      PUPPETEER_NO_SANDBOX: "true"
+    expose:
+      - "3000"
+    volumes:
+      - nbrg-parkrun-data:/data
+
+volumes:
+  nbrg-parkrun-data:
