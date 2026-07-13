@@ -38,7 +38,7 @@ During development, `src/setupProxy.js` attaches the live API to the React devel
 
 ## Deploy to Coolify
 
-The repository includes both a `Dockerfile` and `compose.yaml`. The container installs Chromium and runs it inside a virtual display, so no browser window is visible to the person generating a report.
+The repository includes both a `Dockerfile` and `compose.yaml`. The container installs Chromium and runs it in headless mode, so it does not need an X server and no browser window is visible to the person generating a report.
 
 Recommended Coolify setup:
 
@@ -51,5 +51,7 @@ Recommended Coolify setup:
 For a Dockerfile deployment instead, select **Dockerfile**, expose port `3000`, and add persistent storage mounted at `/data` in Coolify. No environment variables are required because the production defaults are included in the image.
 
 The server intentionally permits only one live report extraction at a time. A second request receives a friendly “report already being checked” response instead of opening another 90 browser checks.
+
+Production extraction is deliberately limited to one athlete page at a time with a short delay between pages. This makes the first uncached report slower, but reduces container resource spikes and the chance of triggering parkrun's automated-access protection. `PARKRUN_WORKERS` and `PARKRUN_REQUEST_DELAY_MS` can be adjusted if necessary.
 
 This project is not affiliated with parkrun.

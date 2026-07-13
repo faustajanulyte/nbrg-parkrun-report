@@ -9,7 +9,8 @@ const DATA_DIR = process.env.PARKRUN_DATA_DIR || process.cwd();
 const PROFILE_DIR = path.join(DATA_DIR, '.parkrun-browser-profile');
 const CACHE_DIR = path.join(DATA_DIR, '.cache', 'parkrun-athletes');
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
-const WORKER_COUNT = 3;
+const WORKER_COUNT = Math.max(1, Number(process.env.PARKRUN_WORKERS || (process.env.NODE_ENV === 'production' ? 1 : 3)));
+const REQUEST_DELAY_MS = Math.max(250, Number(process.env.PARKRUN_REQUEST_DELAY_MS || (process.env.NODE_ENV === 'production' ? 1250 : 250)));
 
 let browserPromise;
 
@@ -227,7 +228,7 @@ async function mapWithWorkers(items, worker) {
       while (nextIndex < items.length) {
         const index = nextIndex++;
         results[index] = await worker(items[index], page, index);
-        await new Promise((resolve) => setTimeout(resolve, 250));
+        await new Promise((resolve) => setTimeout(resolve, REQUEST_DELAY_MS));
       }
     } finally {
       await page.close();
