@@ -17,6 +17,17 @@ const INTERACTIVE_CAPTCHA_TIMEOUT_MS = Math.max(60000, Number(process.env.PARKRU
 
 let browserPromise;
 
+function log(level, event, details = {}) {
+  const entry = JSON.stringify({ timestamp: new Date().toISOString(), level, component: 'parkrun', event, ...details });
+  (level === 'error' ? console.error : level === 'warn' ? console.warn : console.log)(entry);
+}
+
+function progress(onProgress, phase, message, details = {}) {
+  const update = { phase, message, ...details };
+  log('info', phase, details);
+  onProgress?.(update);
+}
+
 function cleanEvent(value) {
   return value.replace(/\s+parkrun$/i, '').trim();
 }
@@ -53,13 +64,18 @@ async function getBrowser() {
     const containerArgs = process.env.PUPPETEER_NO_SANDBOX === 'true'
       ? ['--no-sandbox', '--disable-setuid-sandbox']
       : [];
+    log('info', 'browser_launch', { headless: HEADLESS, executablePath: CHROME_PATH, display: process.env.DISPLAY || null });
     browserPromise = puppeteer.launch({
       headless: HEADLESS,
       executablePath: CHROME_PATH,
       userDataDir: PROFILE_DIR,
       args: ['--no-first-run', '--no-default-browser-check', '--disable-dev-shm-usage', ...containerArgs],
       defaultViewport: { width: 1180, height: 800 },
+    }).then((browser) => {
+      log('info', 'browser_ready', { headless: HEADLESS });
+      return browser;
     }).catch((error) => {
+      log('error', 'browser_launch_failed', { message: error.message });
       browserPromise = undefined;
       throw error;
     });
@@ -79,13 +95,6 @@ async function closeBrowser() {
   }
 }
 
-async function waitForResults(page, timeout = 120000) {
-  await page.waitForFunction(
-    () => Array.from(document.querySelectorAll('table')).some((table) => table.querySelectorAll('td').length > 0),
-    { timeout }
-  );
-}
-
 async function inspectPage(page) {
   return page.evaluate(() => {
     const text = document.body?.innerText || '';
@@ -97,15 +106,36 @@ async function inspectPage(page) {
   }).catch(() => ({ hasResults: false, hasSecurityCheck: true }));
 }
 
-async function waitForInteractiveCaptcha(page) {
-  console.log('[parkrun] Security check detected. Complete it in the Chrome window to continue.');
+async function waitForPageOutcome(page, timeout = 120000) {
+  const deadline = Date.now() + timeout;
+  let securityDetectedAt = 0;
+
+  while (Date.now() < deadline) {
+    const state = await inspectPage(page);
+    if (state.hasResults && !state.hasSecurityCheck) return state;
+    if (state.hasSecurityCheck) {
+      securityDetectedAt ||= Date.now();
+      if (Date.now() - securityDetectedAt >= 3000) return state;
+    } else {
+      securityDetectedAt = 0;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+
+  throw new Error(`Timed out after ${timeout}ms while waiting for parkrun results.`);
+}
+
+async function waitForInteractiveCaptcha(page, onProgress) {
+  progress(onProgress, 'waiting_for_captcha', 'Complete the parkrun security check in the secure browser.', {
+    browserUrl: process.env.PARKRUN_BROWSER_URL || null,
+  });
   await page.bringToFront();
   const deadline = Date.now() + INTERACTIVE_CAPTCHA_TIMEOUT_MS;
 
   while (Date.now() < deadline) {
     const state = await inspectPage(page);
     if (state.hasResults && !state.hasSecurityCheck) {
-      console.log('[parkrun] Security check completed; continuing the report.');
+      progress(onProgress, 'captcha_completed', 'Security check completed. Continuing the report.');
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -116,36 +146,49 @@ async function waitForInteractiveCaptcha(page) {
   throw error;
 }
 
-function securityChallengeError() {
+function securityChallengeError(onProgress) {
+  progress(onProgress, 'captcha_blocked', 'parkrun requested an interactive CAPTCHA, but the browser is running headlessly.');
   const error = new Error('parkrun requested a CAPTCHA, so the report could not be checked automatically. Please try again later.');
   error.code = 'PARKRUN_SECURITY_CHALLENGE';
   return error;
 }
 
-async function loadPage(page, url) {
+async function loadPage(page, url, onProgress, pageType) {
+  log('info', 'page_load_start', { pageType, host: new URL(url).host });
   const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
   const wafAction = response?.headers()?.['x-amzn-waf-action'];
+  log(wafAction ? 'warn' : 'info', 'page_load_response', {
+    pageType,
+    host: new URL(url).host,
+    status: response?.status() || null,
+    wafAction: wafAction || null,
+  });
   if (wafAction === 'captcha') {
-    if (HEADLESS) throw securityChallengeError();
-    await waitForInteractiveCaptcha(page);
+    if (HEADLESS) throw securityChallengeError(onProgress);
+    await waitForInteractiveCaptcha(page, onProgress);
     return;
   }
   try {
-    await waitForResults(page);
+    const state = await waitForPageOutcome(page);
+    if (state.hasSecurityCheck) {
+      if (HEADLESS) throw securityChallengeError(onProgress);
+      await waitForInteractiveCaptcha(page, onProgress);
+    }
   } catch (error) {
+    if (error.code === 'PARKRUN_SECURITY_CHALLENGE') throw error;
     const state = await inspectPage(page);
     if (wafAction === 'challenge' || state.hasSecurityCheck) {
-      if (HEADLESS) throw securityChallengeError();
-      await waitForInteractiveCaptcha(page);
+      if (HEADLESS) throw securityChallengeError(onProgress);
+      await waitForInteractiveCaptcha(page, onProgress);
       return;
     }
     throw error;
   }
 }
 
-async function extractClubResults(page, date) {
+async function extractClubResults(page, date, onProgress) {
   const url = `https://www.parkrun.com/results/consolidatedclub/?clubNum=${CLUB_NUMBER}&eventdate=${date}`;
-  await loadPage(page, url);
+  await loadPage(page, url, onProgress, 'club_report');
   return page.evaluate(({ clubName }) => {
     const cleanEvent = (value) => value.replace(/\s+parkrun$/i, '').trim();
     const results = [];
@@ -212,10 +255,13 @@ function writeCache(athleteId, data) {
   fs.writeFileSync(path.join(CACHE_DIR, `${athleteId}.json`), JSON.stringify(data));
 }
 
-async function extractAthleteHistory(page, athleteId) {
+async function extractAthleteHistory(page, athleteId, onProgress) {
   const cached = readCache(athleteId);
-  if (cached) return cached;
-  await loadPage(page, `https://www.parkrun.org.uk/parkrunner/${athleteId}/all/`);
+  if (cached) {
+    log('info', 'athlete_cache_hit', { athleteId });
+    return cached;
+  }
+  await loadPage(page, `https://www.parkrun.org.uk/parkrunner/${athleteId}/all/`, onProgress, 'athlete_history');
   const data = await page.evaluate(() => {
     const table = Array.from(document.querySelectorAll('table')).find((candidate) => {
       const headers = Array.from(candidate.querySelectorAll('th')).map((cell) => cell.textContent.trim().toLowerCase());
@@ -281,31 +327,55 @@ async function mapWithWorkers(items, worker) {
   return results;
 }
 
-async function analyseReport(date) {
+async function analyseReport(date, options = {}) {
+  const onProgress = options.onProgress;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('Date must use YYYY-MM-DD format');
+  const startedAt = Date.now();
+  progress(onProgress, 'starting', 'Starting the parkrun report.', { date, headless: HEADLESS });
   const browser = await getBrowser();
   const reportPage = await browser.newPage();
   let clubResults;
   try {
-    clubResults = await extractClubResults(reportPage, date);
+    progress(onProgress, 'checking_club_report', 'Checking the NBRG club report.', { date });
+    clubResults = await extractClubResults(reportPage, date, onProgress);
   } finally {
     await reportPage.close();
   }
   if (!clubResults.length) throw new Error(`No NBRG results were found for ${date}`);
+  progress(onProgress, 'checking_athletes', `Checking ${clubResults.length} athlete histories.`, {
+    completed: 0,
+    total: clubResults.length,
+  });
 
   const failures = [];
+  let completed = 0;
   const analysed = await mapWithWorkers(clubResults, async (result, page) => {
+    let securityChallenge = false;
     try {
-      const history = await extractAthleteHistory(page, result.athleteId);
+      const history = await extractAthleteHistory(page, result.athleteId, onProgress);
       return analyseAthlete(result, history, date);
     } catch (error) {
-      if (error.code === 'PARKRUN_SECURITY_CHALLENGE') throw error;
+      if (error.code === 'PARKRUN_SECURITY_CHALLENGE') {
+        securityChallenge = true;
+        throw error;
+      }
       failures.push({ athleteId: result.athleteId, name: result.name, message: error.message });
       return { ...result, totalRuns: 0, eventRuns: 0, verified: false };
+    } finally {
+      if (!securityChallenge) {
+        completed += 1;
+        if (completed === clubResults.length || completed % 10 === 0) {
+          progress(onProgress, 'checking_athletes', `Checked ${completed} of ${clubResults.length} athlete histories.`, {
+            completed,
+            total: clubResults.length,
+            failures: failures.length,
+          });
+        }
+      }
     }
   });
 
-  return {
+  const report = {
     clubNumber: Number(CLUB_NUMBER),
     clubName: CLUB_NAME,
     date,
@@ -315,6 +385,16 @@ async function analyseReport(date) {
     profileFailures: failures,
     generatedAt: new Date().toISOString(),
   };
+  const completion = {
+    date,
+    members: report.memberCount,
+    events: report.eventCount,
+    failures: failures.length,
+    durationMs: Date.now() - startedAt,
+  };
+  log('info', 'report_completed', completion);
+  onProgress?.({ phase: 'complete', message: 'Report completed.', ...completion });
+  return report;
 }
 
 module.exports = { analyseReport, closeBrowser };

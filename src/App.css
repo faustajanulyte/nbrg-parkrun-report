@@ -88,6 +88,8 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .loading-status > div { display: flex; flex-direction: column; gap: 2px; }
 .loading-status strong { font-size: 10px; }
 .loading-status small { color: #929b8c; font-size: 9px; line-height: 1.4; }
+.browser-console-link { width: fit-content; margin-top: 6px; display: inline-flex; align-items: center; gap: 5px; color: var(--lime); font-size: 10px; font-weight: 700; text-decoration: none; }
+.browser-console-link:hover { text-decoration: underline; }
 .loading-spinner { width: 17px; height: 17px; flex: 0 0 17px; border: 2px solid #3a4c24; border-top-color: var(--lime); border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .source-link { margin-top: 14px; display: flex; align-items: center; justify-content: center; gap: 5px; color: #92988f; text-decoration: none; font-size: 11px; }

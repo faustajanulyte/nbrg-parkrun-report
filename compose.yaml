@@ -6,13 +6,16 @@ services:
     environment:
       PORT: 3000
       PARKRUN_DATA_DIR: /data
-      PARKRUN_HEADLESS: "true"
+      PARKRUN_HEADLESS: "${PARKRUN_HEADLESS:-true}"
+      PARKRUN_BROWSER_URL: "${PARKRUN_BROWSER_URL:-}"
+      PARKRUN_VNC_PASSWORD: "${PARKRUN_VNC_PASSWORD:-}"
       PARKRUN_WORKERS: "1"
       PARKRUN_REQUEST_DELAY_MS: "1250"
       PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
       PUPPETEER_NO_SANDBOX: "true"
     expose:
       - "3000"
+      - "6080"
     volumes:
       - nbrg-parkrun-data:/data
 

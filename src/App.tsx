@@ -31,6 +31,14 @@ type ReportSuggestion = {
   reason: string;
 };
 
+type ReportStatus = {
+  phase: string;
+  message: string;
+  completed?: number;
+  total?: number;
+  browserUrl?: string | null;
+};
+
 const CLUB_NUMBER = '22631';
 
 function latestSaturday() {
@@ -182,6 +190,7 @@ const App: React.FC = () => {
   const [copied, setCopied] = useState(false);
   const [customNote, setCustomNote] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loadingStatus, setLoadingStatus] = useState<ReportStatus>({ phase: 'idle', message: 'Checking the club results and athlete histories.' });
   const [error, setError] = useState('');
   const [profileFailures, setProfileFailures] = useState(0);
 
@@ -192,7 +201,19 @@ const App: React.FC = () => {
   const generate = async (event: React.FormEvent) => {
     event.preventDefault();
     setLoading(true);
+    setLoadingStatus({ phase: 'starting', message: 'Starting the parkrun report.' });
     setError('');
+    const checkStatus = async () => {
+      try {
+        const response = await fetch('/api/parkrun-report/status', { cache: 'no-store' });
+        if (!response.ok) return;
+        const next = await response.json();
+        if (next.phase !== 'idle') setLoadingStatus(next);
+      } catch {
+        // The main report request will surface any server/network error.
+      }
+    };
+    const statusTimer = window.setInterval(checkStatus, 1500);
     try {
       const response = await fetch(`/api/parkrun-report?date=${encodeURIComponent(date)}`);
       const data = await response.json();
@@ -212,6 +233,7 @@ const App: React.FC = () => {
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to load the parkrun report');
     } finally {
+      window.clearInterval(statusTimer);
       setLoading(false);
     }
   };
@@ -289,7 +311,11 @@ const App: React.FC = () => {
           <button className="primary-button" type="submit" disabled={loading}><Icon name={loading ? 'refresh' : 'sparkles'} size={18} /> {loading ? 'Checking club and athlete results…' : 'Generate live report'}</button>
           {loading && <div className="loading-status" role="status" aria-live="polite">
             <span className="loading-spinner" />
-            <div><strong>Building the report</strong><small>Checking the club results and athlete histories. This can take a couple of minutes.</small></div>
+            <div>
+              <strong>{loadingStatus.phase === 'waiting_for_captcha' ? 'Security check needs you' : 'Building the report'}</strong>
+              <small>{loadingStatus.message}{loadingStatus.total ? ` (${loadingStatus.completed || 0}/${loadingStatus.total})` : ''}</small>
+              {loadingStatus.phase === 'waiting_for_captcha' && loadingStatus.browserUrl && <a className="browser-console-link" href={loadingStatus.browserUrl} target="_blank" rel="noreferrer">Open secure browser <Icon name="external" size={13}/></a>}
+            </div>
           </div>}
         </form>
       </section>
