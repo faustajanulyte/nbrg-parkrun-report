@@ -43,7 +43,16 @@ function latestSaturday() {
   return `${year}-${month}-${day}`;
 }
 
+function todayIso() {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  const day = String(today.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 const LATEST_PARKRUN_DATE = latestSaturday();
+const TODAY = todayIso();
 
 const milestoneNumbers = new Set([10, 25, 50, 100, 250, 300, 400, 500]);
 
@@ -114,8 +123,13 @@ function formatDate(value: string) {
   return new Intl.DateTimeFormat('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${value}T12:00:00Z`));
 }
 
-function shortDate(value: string) {
-  return new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'long', timeZone: 'UTC' }).format(new Date(`${value}T12:00:00Z`));
+function weekday(value: string) {
+  return new Intl.DateTimeFormat('en-GB', { weekday: 'long', timeZone: 'UTC' }).format(new Date(`${value}T12:00:00Z`));
+}
+
+function britishNumericDate(value: string) {
+  const [year, month, day] = value.split('-');
+  return `${day}/${month}/${year}`;
 }
 
 function buildPost(date: string, items: Result[], memberCount: number, eventCount: number, reportSuggestions: ReportSuggestion[], suggestionChoices: Record<string, boolean>, customNote = '') {
@@ -145,7 +159,7 @@ function buildPost(date: string, items: Result[], memberCount: number, eventCoun
     customNote.trim() ? `📝 MOMENT OF THE WEEK\n${customNote.trim()}` : '',
   ].filter(Boolean);
 
-  return `Good afternoon! Here is this week's parkrun report for Saturday ${shortDate(date)} 🏃\n\nThere were ${memberCount} NBRG family members across ${eventCount} events.${sections.length ? `\n\n${sections.join('\n\n')}` : ''}\n\nWell done to everyone! If we've missed your PB or milestone, please let us know.\n\n😇 parkrun can't happen without volunteers. Please consider missing a run now and then to help out, or combine your run with a volunteer role. 😇`;
+  return `Good afternoon! Here is this week's parkrun report for ${formatDate(date)} 🏃\n\nThere were ${memberCount} NBRG family members across ${eventCount} events.${sections.length ? `\n\n${sections.join('\n\n')}` : ''}\n\nWell done to everyone! If we've missed your PB or milestone, please let us know.\n\n😇 parkrun can't happen without volunteers. Please consider missing a run now and then to help out, or combine your run with a volunteer role. 😇`;
 }
 
 function SectionHeading({ icon, title, count, tone }: { icon: IconName; title: string; count: number; tone: string }) {
@@ -241,15 +255,18 @@ const App: React.FC = () => {
         <form className="generator-card" onSubmit={generate}>
           <div className="card-title">
             <span><Icon name="flag" size={20} /></span>
-            <div><h2>NBRG parkrun report</h2><p>Choose a Saturday</p></div>
+            <div><h2>NBRG parkrun report</h2><p>Choose a parkrun date</p></div>
           </div>
           <label htmlFor="date">parkrun date</label>
           <div className="input-wrap date-input">
+            <span className="date-display" aria-hidden="true">{britishNumericDate(date)}</span>
+            <Icon name="calendar" size={18} />
             <input
               id="date"
               type="date"
+              aria-label={`parkrun date, ${britishNumericDate(date)}`}
               value={date}
-              max={LATEST_PARKRUN_DATE}
+              max={TODAY}
               onClick={(event) => (event.currentTarget as HTMLInputElement & { showPicker?: () => void }).showPicker?.()}
               onChange={(event) => {
                 setDate(event.target.value || LATEST_PARKRUN_DATE);
@@ -258,7 +275,6 @@ const App: React.FC = () => {
               }}
             />
           </div>
-          <small className="date-help">Latest available Saturday: {shortDate(LATEST_PARKRUN_DATE)}</small>
           <label htmlFor="custom-note">Moment of the week <span className="optional">Optional</span></label>
           <div className="input-wrap note-input">
             <Icon name="pencil" size={18} />
@@ -281,7 +297,7 @@ const App: React.FC = () => {
       {generated && <section className="report-section" id="report">
         <div className="report-header">
           <div>
-            <h2>Saturday's roundup</h2>
+            <h2>{weekday(date)}'s roundup</h2>
             <p>{formatDate(date)} · {memberCount} real result rows analysed</p>
           </div>
         </div>

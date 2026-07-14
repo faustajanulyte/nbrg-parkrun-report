@@ -9,8 +9,11 @@ const DATA_DIR = process.env.PARKRUN_DATA_DIR || process.cwd();
 const PROFILE_DIR = path.join(DATA_DIR, '.parkrun-browser-profile');
 const CACHE_DIR = path.join(DATA_DIR, '.cache', 'parkrun-athletes');
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
-const WORKER_COUNT = Math.max(1, Number(process.env.PARKRUN_WORKERS || (process.env.NODE_ENV === 'production' ? 1 : 3)));
+const HEADLESS = process.env.PARKRUN_HEADLESS === 'true';
+const DEFAULT_WORKER_COUNT = process.env.NODE_ENV === 'production' || !HEADLESS ? 1 : 3;
+const WORKER_COUNT = Math.max(1, Number(process.env.PARKRUN_WORKERS || DEFAULT_WORKER_COUNT));
 const REQUEST_DELAY_MS = Math.max(250, Number(process.env.PARKRUN_REQUEST_DELAY_MS || (process.env.NODE_ENV === 'production' ? 1250 : 250)));
+const INTERACTIVE_CAPTCHA_TIMEOUT_MS = Math.max(60000, Number(process.env.PARKRUN_CAPTCHA_TIMEOUT_MS || 10 * 60 * 1000));
 
 let browserPromise;
 
@@ -51,7 +54,7 @@ async function getBrowser() {
       ? ['--no-sandbox', '--disable-setuid-sandbox']
       : [];
     browserPromise = puppeteer.launch({
-      headless: process.env.PARKRUN_HEADLESS === 'true',
+      headless: HEADLESS,
       executablePath: CHROME_PATH,
       userDataDir: PROFILE_DIR,
       args: ['--no-first-run', '--no-default-browser-check', '--disable-dev-shm-usage', ...containerArgs],
@@ -83,18 +86,58 @@ async function waitForResults(page, timeout = 120000) {
   );
 }
 
+async function inspectPage(page) {
+  return page.evaluate(() => {
+    const text = document.body?.innerText || '';
+    return {
+      hasResults: Array.from(document.querySelectorAll('table')).some((table) => table.querySelectorAll('td').length > 0),
+      hasSecurityCheck: Boolean(document.querySelector('#captcha-container, .amzn-captcha-modal, #amzn-btn-verify-internal'))
+        || /captcha|verify you are human|security check/i.test(text),
+    };
+  }).catch(() => ({ hasResults: false, hasSecurityCheck: true }));
+}
+
+async function waitForInteractiveCaptcha(page) {
+  console.log('[parkrun] Security check detected. Complete it in the Chrome window to continue.');
+  await page.bringToFront();
+  const deadline = Date.now() + INTERACTIVE_CAPTCHA_TIMEOUT_MS;
+
+  while (Date.now() < deadline) {
+    const state = await inspectPage(page);
+    if (state.hasResults && !state.hasSecurityCheck) {
+      console.log('[parkrun] Security check completed; continuing the report.');
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+
+  const error = new Error('The parkrun security check was not completed in time. Please generate the report again.');
+  error.code = 'PARKRUN_SECURITY_CHALLENGE';
+  throw error;
+}
+
+function securityChallengeError() {
+  const error = new Error('parkrun requested a CAPTCHA, so the report could not be checked automatically. Please try again later.');
+  error.code = 'PARKRUN_SECURITY_CHALLENGE';
+  return error;
+}
+
 async function loadPage(page, url) {
   const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
   const wafAction = response?.headers()?.['x-amzn-waf-action'];
   if (wafAction === 'captcha') {
-    throw new Error('parkrun requested a CAPTCHA, so the report could not be checked automatically. Please try again later.');
+    if (HEADLESS) throw securityChallengeError();
+    await waitForInteractiveCaptcha(page);
+    return;
   }
   try {
     await waitForResults(page);
   } catch (error) {
-    const pageText = await page.evaluate(() => document.body?.innerText || '').catch(() => '');
-    if (wafAction === 'challenge' || /captcha|verify you are human|security check/i.test(pageText)) {
-      throw new Error('parkrun blocked the automated check with a security challenge. Please try again later.');
+    const state = await inspectPage(page);
+    if (wafAction === 'challenge' || state.hasSecurityCheck) {
+      if (HEADLESS) throw securityChallengeError();
+      await waitForInteractiveCaptcha(page);
+      return;
     }
     throw error;
   }
@@ -256,6 +299,7 @@ async function analyseReport(date) {
       const history = await extractAthleteHistory(page, result.athleteId);
       return analyseAthlete(result, history, date);
     } catch (error) {
+      if (error.code === 'PARKRUN_SECURITY_CHALLENGE') throw error;
       failures.push({ athleteId: result.athleteId, name: result.name, message: error.message });
       return { ...result, totalRuns: 0, eventRuns: 0, verified: false };
     }
