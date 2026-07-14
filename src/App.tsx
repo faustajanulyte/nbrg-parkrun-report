@@ -309,12 +309,16 @@ const App: React.FC = () => {
           </div>
           {error && <div className="load-error">{error}</div>}
           <button className="primary-button" type="submit" disabled={loading}><Icon name={loading ? 'refresh' : 'sparkles'} size={18} /> {loading ? 'Checking club and athlete results…' : 'Generate live report'}</button>
-          {loading && <div className="loading-status" role="status" aria-live="polite">
-            <span className="loading-spinner" />
+          {loading && <div className={`loading-status ${loadingStatus.phase === 'waiting_for_captcha' ? 'captcha-required' : ''}`} role={loadingStatus.phase === 'waiting_for_captcha' ? 'alert' : 'status'} aria-live={loadingStatus.phase === 'waiting_for_captcha' ? 'assertive' : 'polite'}>
+            {loadingStatus.phase === 'waiting_for_captcha'
+              ? <span className="captcha-alert-icon"><Icon name="flag" size={28}/></span>
+              : <span className="loading-spinner" />}
             <div>
-              <strong>{loadingStatus.phase === 'waiting_for_captcha' ? 'Security check needs you' : 'Building the report'}</strong>
-              <small>{loadingStatus.message}{loadingStatus.total ? ` (${loadingStatus.completed || 0}/${loadingStatus.total})` : ''}</small>
-              {loadingStatus.phase === 'waiting_for_captcha' && loadingStatus.browserUrl && <a className="browser-console-link" href={loadingStatus.browserUrl} target="_blank" rel="noreferrer">Open secure browser <Icon name="external" size={13}/></a>}
+              <strong>{loadingStatus.phase === 'waiting_for_captcha' ? 'Action needed: complete the security check' : 'Building the report'}</strong>
+              <small>{loadingStatus.phase === 'waiting_for_captcha'
+                ? 'The report is paused. Open the secure browser below, complete the CAPTCHA, then return here. The report will continue automatically.'
+                : <>{loadingStatus.message}{loadingStatus.total ? ` (${loadingStatus.completed || 0}/${loadingStatus.total})` : ''}</>}</small>
+              {loadingStatus.phase === 'waiting_for_captcha' && loadingStatus.browserUrl && <a className="browser-console-link" href={loadingStatus.browserUrl} target="_blank" rel="noreferrer">Open security check <Icon name="external" size={18}/></a>}
             </div>
           </div>}
         </form>
