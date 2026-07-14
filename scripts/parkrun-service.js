@@ -6,7 +6,7 @@ const CLUB_NUMBER = '22631';
 const CLUB_NAME = 'North Bristol Running Group';
 const CHROME_PATH = process.env.PUPPETEER_EXECUTABLE_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const DATA_DIR = process.env.PARKRUN_DATA_DIR || process.cwd();
-const PROFILE_DIR = path.join(DATA_DIR, '.parkrun-browser-profile');
+const PROFILE_DIR = process.env.PARKRUN_PROFILE_DIR || path.join(DATA_DIR, '.parkrun-browser-profile');
 const CACHE_DIR = path.join(DATA_DIR, '.cache', 'parkrun-athletes');
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const HEADLESS = process.env.PARKRUN_HEADLESS === 'true';

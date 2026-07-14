@@ -13,6 +13,7 @@ FROM node:20-bookworm-slim AS production
 ENV NODE_ENV=production \
     PORT=3000 \
     PARKRUN_DATA_DIR=/data \
+    PARKRUN_PROFILE_DIR=/tmp/parkrun-browser-profile \
     PARKRUN_HEADLESS=true \
     PARKRUN_WORKERS=1 \
     PARKRUN_REQUEST_DELAY_MS=1250 \

@@ -47,7 +47,7 @@ Recommended Coolify setup:
 1. Create a new resource from this Git repository.
 2. Select **Docker Compose** as the build pack. Coolify will read `compose.yaml`.
 3. Assign the application domain to the `nbrg-parkrun-report` service on port `3000`.
-4. Deploy. The named `nbrg-parkrun-data` volume preserves the browser session and athlete-history cache.
+4. Deploy. The named `nbrg-parkrun-data` volume preserves the athlete-history cache. Chromium keeps its live profile inside each container so overlapping Coolify deployments cannot lock or corrupt one shared profile.
 5. Set the health-check path to `/health` if Coolify does not pick up the image health check automatically.
 
 For a Dockerfile deployment instead, select **Dockerfile**, expose port `3000`, and add persistent storage mounted at `/data` in Coolify. No environment variables are required for headless mode because the production defaults are included in the image.
@@ -63,7 +63,7 @@ To allow manual CAPTCHA completion in Coolify:
 5. Set `PARKRUN_BROWSER_URL` to the second domain, for example `https://nbrg-browser.example.com/vnc.html?autoconnect=true&resize=scale`.
 6. Redeploy. The logs should contain `browser_console_ready` and `server_listening`.
 
-When the report encounters a CAPTCHA, its loading panel changes to **Security check needs you** and shows **Open secure browser**. Open it, enter the VNC password, complete the CAPTCHA, and return to the report tab. Do not expose port `6080` without HTTPS and a random VNC password because the console can display the persistent browser session. Restrict the browser domain by IP or an additional access-control layer when your hosting setup supports it.
+When the report encounters a CAPTCHA, its loading panel changes to **Action needed: complete the security check** and shows **Open security check**. Open it, enter the VNC password, complete the CAPTCHA, and return to the report tab. Do not expose port `6080` without HTTPS and a random VNC password because the console can display the active browser session. Restrict the browser domain by IP or an additional access-control layer when your hosting setup supports it.
 
 ### Coolify logs
 
