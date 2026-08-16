@@ -5,6 +5,8 @@ export interface ParkrunResult {
     date: string;
     time: string;
     position: number;
+    ageCategory?: string;
+    ageGroupPosition?: number;
     totalRuns: number;
     eventRuns: number;
     isFirstTimer: boolean;

@@ -4,6 +4,7 @@ A mobile-friendly weekly report generator for North Bristol Running Group. It tu
 
 - member and event totals for the selected parkrun date
 - overall parkrun milestones and single-event milestones
+- top-three age-group finishes, including category and position
 - course PBs (excluding first-time visits)
 - all-time PBs
 - unusual result coincidences suggested as optional extras
@@ -28,7 +29,7 @@ npm run start:production
 
 ## Live data
 
-The app reads North Bristol Running Group's official consolidated club report for the selected date, then checks every listed athlete's complete parkrun history. It derives historical totals as of that date, overall and event-specific milestones, first visits, event PBs and all-time PBs. This avoids using the current total shown on an athlete's summary for an older report. Saturday is the default, but special-event parkruns on other days are supported.
+The app reads North Bristol Running Group's official consolidated club report for the selected date, checks each event's full results for age-group positions, then checks every listed athlete's complete parkrun history. It derives historical totals as of that date, overall and event-specific milestones, first visits, event PBs and all-time PBs. This avoids using the current total shown on an athlete's summary for an older report. Saturday is the default, but special-event parkruns on other days are supported.
 
 parkrun protects these pages with a browser challenge. The local development setup opens Chrome while a report is checked. If an interactive CAPTCHA appears locally, complete it in the Chrome window and extraction will continue using the persisted browser session. Headed mode checks one athlete at a time so only one security prompt can appear. The wait defaults to 10 minutes and can be adjusted with `PARKRUN_CAPTCHA_TIMEOUT_MS`.
 

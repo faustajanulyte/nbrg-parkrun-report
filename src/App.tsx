@@ -15,6 +15,8 @@ type Result = {
   allTimePb?: boolean;
   firstTimer?: boolean;
   position?: number;
+  ageCategory?: string;
+  ageGroupPosition?: number;
   verified?: boolean;
 };
 
@@ -140,9 +142,23 @@ function britishNumericDate(value: string) {
   return `${day}/${month}/${year}`;
 }
 
+function ordinal(value: number) {
+  const remainder = value % 100;
+  if (remainder >= 11 && remainder <= 13) return `${value}th`;
+  return `${value}${value % 10 === 1 ? 'st' : value % 10 === 2 ? 'nd' : value % 10 === 3 ? 'rd' : 'th'}`;
+}
+
+function findAgeGroupPodiums(items: Result[]) {
+  return items.filter((item) => item.ageCategory && item.ageGroupPosition && item.ageGroupPosition <= 3)
+    .sort((a, b) => a.event.localeCompare(b.event)
+      || (a.ageCategory || '').localeCompare(b.ageCategory || '')
+      || (a.ageGroupPosition || 0) - (b.ageGroupPosition || 0));
+}
+
 function buildPost(date: string, items: Result[], memberCount: number, eventCount: number, reportSuggestions: ReportSuggestion[], suggestionChoices: Record<string, boolean>, customNote = '') {
   const milestones = findMilestones(items);
   const pbs = items.filter((item) => item.coursePb && !item.firstTimer);
+  const ageGroupPodiums = findAgeGroupPodiums(items);
   const byEvent = (items: Result[]) => items.reduce<Record<string, Result[]>>((groups, item) => {
     (groups[item.event] ||= []).push(item);
     return groups;
@@ -160,8 +176,10 @@ function buildPost(date: string, items: Result[], memberCount: number, eventCoun
   ).join('\n')}`).join('\n\n');
   const selectedExtras = reportSuggestions.filter((suggestion) => suggestionChoices[suggestion.id]).map((suggestion) => suggestion.text);
   const pbLines = eventLines(pbs, (r) => `${r.name} — ${r.time}${r.allTimePb ? ' · ALL-TIME PB 🌟' : ' · course PB'}`);
+  const ageGroupLines = eventLines(ageGroupPodiums, (r) => `${r.name} — ${ordinal(r.ageGroupPosition!)} in ${r.ageCategory}`);
   const sections = [
     milestoneLines ? `🏆 MILESTONES\n${milestoneLines}` : '',
+    ageGroupLines ? `🥇 AGE-GROUP TOP 3\n${ageGroupLines}` : '',
     pbLines ? `🎉 PERSONAL BESTS\n${pbLines}` : '',
     selectedExtras.length ? `✨ EXTRA HIGHLIGHTS\n${selectedExtras.map((line) => `• ${line}`).join('\n')}` : '',
     customNote.trim() ? `📝 MOMENT OF THE WEEK\n${customNote.trim()}` : '',
@@ -193,9 +211,11 @@ const App: React.FC = () => {
   const [loadingStatus, setLoadingStatus] = useState<ReportStatus>({ phase: 'idle', message: 'Checking the club results and athlete histories.' });
   const [error, setError] = useState('');
   const [profileFailures, setProfileFailures] = useState(0);
+  const [ageGroupFailures, setAgeGroupFailures] = useState(0);
 
   const milestones = useMemo(() => findMilestones(reportResults), [reportResults]);
   const pbs = useMemo(() => reportResults.filter((item) => item.coursePb && !item.firstTimer), [reportResults]);
+  const ageGroupPodiums = useMemo(() => findAgeGroupPodiums(reportResults), [reportResults]);
   const allTimePbs = useMemo(() => pbs.filter((item) => item.allTimePb), [pbs]);
 
   const generate = async (event: React.FormEvent) => {
@@ -227,6 +247,7 @@ const App: React.FC = () => {
       setSuggestions(liveSuggestions);
       setSuggestionChoices(choices);
       setProfileFailures(data.profileFailures?.length || 0);
+      setAgeGroupFailures(data.ageGroupFailures?.length || 0);
       setPost(buildPost(date, results, data.memberCount, data.eventCount, liveSuggestions, choices, customNote));
       setGenerated(true);
       window.setTimeout(() => document.getElementById('report')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
@@ -304,7 +325,7 @@ const App: React.FC = () => {
           </div>
           <div className="live-connect">
             <span><i className="live-dot" /> Live parkrun data</span>
-            <p>Uses the NBRG club report and each runner’s full result history.</p>
+            <p>Uses the NBRG club report, event results and each runner’s full result history.</p>
             <a className="official-report-button" href={`https://www.parkrun.com/results/consolidatedclub/?clubNum=${CLUB_NUMBER}&eventdate=${date}`} target="_blank" rel="noreferrer">View official NBRG report <Icon name="external" size={13}/></a>
           </div>
           {error && <div className="load-error">{error}</div>}
@@ -332,10 +353,12 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        <div className={`coverage-banner ${profileFailures ? 'partial' : ''}`}>
-          <span><Icon name={profileFailures ? 'refresh' : 'tick'} size={14}/></span>
-          <strong>{profileFailures ? 'Report partially checked' : 'Live data verified'}</strong>
-          <small>{profileFailures ? `${profileFailures} athlete profiles could not be checked` : 'All athlete profiles matched'}</small>
+        <div className={`coverage-banner ${profileFailures || ageGroupFailures ? 'partial' : ''}`}>
+          <span><Icon name={profileFailures || ageGroupFailures ? 'refresh' : 'tick'} size={14}/></span>
+          <strong>{profileFailures || ageGroupFailures ? 'Report partially checked' : 'Live data verified'}</strong>
+          <small>{profileFailures || ageGroupFailures
+            ? [profileFailures ? `${profileFailures} athlete profiles` : '', ageGroupFailures ? `${ageGroupFailures} event age-group checks` : ''].filter(Boolean).join(' and ') + ' could not be checked'
+            : 'All athlete profiles and age groups matched'}</small>
         </div>
 
         <div className="stats-grid">
@@ -347,7 +370,7 @@ const App: React.FC = () => {
 
         <div className="content-grid">
           <div className="findings-card">
-            <div className="findings-top"><div><h2>This week's highlights</h2><p>Confirmed from the club report and dated athlete histories</p></div></div>
+            <div className="findings-top"><div><h2>This week's highlights</h2><p>Confirmed from club, event and dated athlete results</p></div></div>
 
             {milestones.length > 0 && <div className="findings-section">
               <SectionHeading icon="medal" title="Milestones" count={milestones.length} tone="amber" />
@@ -356,6 +379,17 @@ const App: React.FC = () => {
                   <span className="avatar">{result.name.split(' ').map((n) => n[0]).join('')}</span>
                   <div><strong>{result.name}</strong><span>{result.event}</span></div>
                   <span className={`milestone-badge ${kind === 'event' ? 'event-badge' : ''}`}>{count}<small>{kind === 'overall' ? 'total runs' : `at event`}</small></span>
+                </div>)}
+              </div>
+            </div>}
+
+            {ageGroupPodiums.length > 0 && <div className="findings-section">
+              <SectionHeading icon="medal" title="Age-group top 3" count={ageGroupPodiums.length} tone="green" />
+              <div className="milestone-list">
+                {ageGroupPodiums.map((item) => <div className="person-row" key={`${item.athleteId}-${item.event}-age-group`}>
+                  <span className="avatar">{item.name.split(' ').map((name) => name[0]).join('')}</span>
+                  <div><strong>{item.name}</strong><span>{item.event}</span></div>
+                  <span className="milestone-badge age-group-badge">{ordinal(item.ageGroupPosition!)}<small>{item.ageCategory}</small></span>
                 </div>)}
               </div>
             </div>}

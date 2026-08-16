@@ -150,6 +150,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .milestone-badge { min-width: 48px; padding: 6px 8px; display: flex; flex-direction: column; align-items: center; color: #f5c358; background: #30250f; border: 1px solid #56431c; border-radius: 8px; font: 800 14px 'Manrope'; }
 .milestone-badge small { font: 700 9px 'DM Sans'; text-transform: uppercase; letter-spacing: .35px; }
 .milestone-badge.event-badge { color: var(--lime); background: #1f2c10; border-color: #405b1e; }
+.milestone-badge.age-group-badge { min-width: 72px; color: var(--lime); background: #1f2c10; border-color: #405b1e; }
 .pb-table { border: 1px solid #30332d; border-radius: 9px; overflow: hidden; }
 .pb-row { min-height: 64px; padding: 10px 12px; display: grid; grid-template-columns: 1fr 64px 110px; align-items: center; gap: 12px; border-bottom: 1px solid #292c27; }
 .pb-row:last-child { border-bottom: 0; }

@@ -191,6 +191,28 @@ async function extractClubResults(page, date, onProgress) {
   await loadPage(page, url, onProgress, 'club_report');
   return page.evaluate(({ clubName }) => {
     const cleanEvent = (value) => value.replace(/\s+parkrun$/i, '').trim();
+    const findEventResultsUrl = (table, heading) => {
+      const candidates = [];
+      const addLinks = (element) => {
+        if (!element) return;
+        if (element.matches?.('a[href]')) candidates.push(element);
+        candidates.push(...element.querySelectorAll?.('a[href]') || []);
+      };
+
+      addLinks(table);
+      addLinks(heading);
+      let sibling = table.previousElementSibling;
+      for (let checked = 0; sibling && checked < 6; checked += 1, sibling = sibling.previousElementSibling) {
+        addLinks(sibling);
+        if (sibling.tagName === 'TABLE') break;
+      }
+
+      return candidates.map((link) => link.href).find((href) => {
+        const pathname = new URL(href).pathname;
+        return /\/results\/(?:weeklyresults|latestresults|\d+)\/?$/i.test(pathname)
+          && !/consolidatedclub/i.test(pathname);
+      }) || null;
+    };
     const results = [];
     document.querySelectorAll('table.sortable').forEach((table) => {
       const headers = Array.from(table.querySelectorAll('th')).map((cell) => cell.textContent.trim().toLowerCase());
@@ -204,6 +226,7 @@ async function extractClubResults(page, date, onProgress) {
       while (heading && !/^H[1-4]$/.test(heading.tagName)) heading = heading.previousElementSibling;
       const fallbackHeading = table.parentElement?.querySelector('h2,h3,h4');
       const event = cleanEvent((heading || fallbackHeading)?.textContent || 'Unknown event');
+      const eventResultsUrl = findEventResultsUrl(table, heading || fallbackHeading);
 
       table.querySelectorAll('tbody tr').forEach((row) => {
         const cells = Array.from(row.querySelectorAll('td'));
@@ -230,6 +253,7 @@ async function extractClubResults(page, date, onProgress) {
           athleteId: id,
           name,
           event,
+          eventResultsUrl,
           time,
           position: Number((cells[positionIndex]?.textContent || '').match(/\d+/)?.[0] || 0),
         });
@@ -237,6 +261,96 @@ async function extractClubResults(page, date, onProgress) {
     });
     return results;
   }, { clubName: CLUB_NAME });
+}
+
+async function addAgeGroupPositions(page, clubResults, onProgress) {
+  const eventGroups = new Map();
+  clubResults.forEach((result) => {
+    if (!result.eventResultsUrl) return;
+    const group = eventGroups.get(result.eventResultsUrl) || [];
+    group.push(result);
+    eventGroups.set(result.eventResultsUrl, group);
+  });
+
+  const failures = [];
+  let completed = 0;
+  progress(onProgress, 'checking_age_groups', `Checking age-group positions at ${eventGroups.size} events.`, {
+    completed,
+    total: eventGroups.size,
+  });
+
+  for (const [url, eventResults] of eventGroups) {
+    try {
+      await loadPage(page, url, onProgress, 'event_results');
+      const positions = await page.evaluate((targetAthleteIds) => {
+        const targetIds = new Set(targetAthleteIds);
+        const table = Array.from(document.querySelectorAll('table')).find((candidate) => {
+          const headers = Array.from(candidate.querySelectorAll('th')).map((cell) => cell.textContent.trim().toLowerCase());
+          return headers.some((header) => header === 'pos' || header.includes('position'))
+            && headers.some((header) => header.includes('parkrunner'))
+            && headers.some((header) => header.includes('age cat') || header.includes('age group'));
+        });
+        if (!table) throw new Error('The event results table did not include age categories.');
+
+        const headers = Array.from(table.querySelectorAll('th')).map((cell) => cell.textContent.trim().toLowerCase());
+        const positionIndex = headers.findIndex((header) => header === 'pos' || header.includes('position'));
+        const runnerIndex = headers.findIndex((header) => header.includes('parkrunner'));
+        const categoryIndex = headers.findIndex((header) => header.includes('age cat') || header.includes('age group'));
+        const categoryCounts = new Map();
+        const matches = {};
+
+        const participants = Array.from(table.querySelectorAll('tbody tr')).map((row) => {
+          const cells = Array.from(row.querySelectorAll('td'));
+          const categoryText = `${cells[categoryIndex]?.textContent || ''} ${row.textContent || ''}`;
+          const ageCategory = categoryText.match(/\b(?:[JSV][MW]\d{2,3}(?:-\d{2,3})?|[MW]WC)\b/i)?.[0]?.toUpperCase() || '';
+          const runnerLink = cells[runnerIndex]?.querySelector('a[href*="/parkrunner/"]')
+            || row.querySelector('a[href*="/parkrunner/"]');
+          return {
+            position: Number((cells[positionIndex]?.textContent || '').match(/\d+/)?.[0] || 0),
+            ageCategory,
+            athleteId: runnerLink?.href.match(/\/parkrunner\/(\d+)/)?.[1] || null,
+          };
+        }).filter((participant) => participant.position > 0 && participant.ageCategory)
+          .sort((a, b) => a.position - b.position);
+
+        participants.forEach(({ ageCategory, athleteId }) => {
+          const ageGroupPosition = (categoryCounts.get(ageCategory) || 0) + 1;
+          categoryCounts.set(ageCategory, ageGroupPosition);
+          if (athleteId && targetIds.has(athleteId)) {
+            matches[athleteId] = { ageCategory, ageGroupPosition };
+          }
+        });
+
+        return matches;
+      }, eventResults.map((result) => result.athleteId));
+
+      eventResults.forEach((result) => Object.assign(result, positions[result.athleteId] || {}));
+    } catch (error) {
+      if (error.code === 'PARKRUN_SECURITY_CHALLENGE') throw error;
+      failures.push({
+        event: eventResults[0]?.event || 'Unknown event',
+        message: error.message,
+      });
+      log('warn', 'age_group_check_failed', {
+        event: eventResults[0]?.event || 'Unknown event',
+        message: error.message,
+      });
+    } finally {
+      completed += 1;
+      progress(onProgress, 'checking_age_groups', `Checked age-group positions at ${completed} of ${eventGroups.size} events.`, {
+        completed,
+        total: eventGroups.size,
+        failures: failures.length,
+      });
+    }
+    if (completed < eventGroups.size) {
+      await new Promise((resolve) => setTimeout(resolve, REQUEST_DELAY_MS));
+    }
+  }
+
+  const missingLinks = new Set(clubResults.filter((result) => !result.eventResultsUrl).map((result) => result.event));
+  missingLinks.forEach((event) => failures.push({ event, message: 'No event results link was found.' }));
+  return failures;
 }
 
 function readCache(athleteId) {
@@ -335,9 +449,13 @@ async function analyseReport(date, options = {}) {
   const browser = await getBrowser();
   const reportPage = await browser.newPage();
   let clubResults;
+  let ageGroupFailures = [];
   try {
     progress(onProgress, 'checking_club_report', 'Checking the NBRG club report.', { date });
     clubResults = await extractClubResults(reportPage, date, onProgress);
+    if (clubResults.length) {
+      ageGroupFailures = await addAgeGroupPositions(reportPage, clubResults, onProgress);
+    }
   } finally {
     await reportPage.close();
   }
@@ -383,6 +501,7 @@ async function analyseReport(date, options = {}) {
     eventCount: new Set(analysed.map((result) => normaliseEvent(result.event))).size,
     results: analysed,
     profileFailures: failures,
+    ageGroupFailures,
     generatedAt: new Date().toISOString(),
   };
   const completion = {
@@ -390,6 +509,7 @@ async function analyseReport(date, options = {}) {
     members: report.memberCount,
     events: report.eventCount,
     failures: failures.length,
+    ageGroupFailures: ageGroupFailures.length,
     durationMs: Date.now() - startedAt,
   };
   log('info', 'report_completed', completion);
